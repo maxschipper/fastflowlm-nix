@@ -107,6 +107,8 @@
             postUnpack = ''
               cp ${./Cargo.lock} "$sourceRoot/Cargo.lock"
             '';
+            nativeBuildInputs = [ pkgs.pkg-config ];
+            buildInputs = [ pkgs.oniguruma ];
           };
 
           # Build tokenizers-cpp C++ library
@@ -186,6 +188,7 @@
               pkgs.util-linux.dev
               pkgs.util-linux.lib
               pkgs.libdrm
+              pkgs.oniguruma
               tokenizers-cpp
               xrt
             ];
@@ -227,6 +230,9 @@
                 src/cmake/FlmAudioCodecs.cmake
               sed -i 's|"[^"]*libvorbis-1\.3\.7\.tar\.gz[^"]*"|"file://${vorbis-tarball}"|' \
                 src/cmake/FlmAudioCodecs.cmake
+              cat >> src/CMakeLists.txt <<'EOF'
+                target_link_libraries(tokenizers_c INTERFACE onig)
+              EOF
             '';
 
             configurePhase = ''
