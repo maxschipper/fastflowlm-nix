@@ -3,10 +3,10 @@
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-    
+
     # The AMD XDNA driver flake
     amd-xdna.url = "git+https://github.com/michnicki/amd-xdna-nix";
-    
+
     # The FastFlowLM source code
     fastflowlm-src = {
       url = "git+https://github.com/ROCm/FastFlowLM";
@@ -14,21 +14,29 @@
     };
   };
 
-  outputs = { self, nixpkgs, amd-xdna, fastflowlm-src }:
+  outputs =
+    {
+      amd-xdna,
+      fastflowlm-src,
+      nixpkgs,
+      self,
+    }:
     let
       supportedSystems = [ "x86_64-linux" ];
       forAllSystems = nixpkgs.lib.genAttrs supportedSystems;
-    in {
-      packages = forAllSystems (system:
+    in
+    {
+      packages = forAllSystems (
+        system:
         let
           pkgs = import nixpkgs {
             inherit system;
             config.allowUnfree = true;
           };
-          
+
           # Use the driver from our local repository
           xrt = amd-xdna.packages.${system}.default;
-          
+
           rustPlatform = pkgs.rustPlatform;
 
           # Fetch tokenizers-cpp with submodules
@@ -106,16 +114,19 @@
             name = "tokenizers-cpp";
             version = "0.1.0";
             src = tokenizers-cpp-src;
-            nativeBuildInputs = [ pkgs.cmake pkgs.ninja ];
+            nativeBuildInputs = [
+              pkgs.cmake
+              pkgs.ninja
+            ];
             buildInputs = [ tokenizers-c-rust ];
             postUnpack = ''
-              mkdir -p "$sourceRoot/build/release"
-              cp ${tokenizers-c-rust}/lib/libtokenizers_c.a "$sourceRoot/build/release/"
-              cat > "$sourceRoot/build/cargo" << 'EOF'
-#!/bin/sh
-exit 0
-EOF
-              chmod +x "$sourceRoot/build/cargo"
+                            mkdir -p "$sourceRoot/build/release"
+                            cp ${tokenizers-c-rust}/lib/libtokenizers_c.a "$sourceRoot/build/release/"
+                            cat > "$sourceRoot/build/cargo" << 'EOF'
+              #!/bin/sh
+              exit 0
+              EOF
+                            chmod +x "$sourceRoot/build/cargo"
             '';
             configurePhase = ''
               cmake -S . -B build -G Ninja \
@@ -182,24 +193,24 @@ EOF
             propagatedBuildInputs = [ npu-kernel-libs ];
 
             postUnpack = ''
-              # Replace empty submodule with the fetched tokenizers-cpp source
-              rm -rf "$sourceRoot/third_party/tokenizers-cpp"
-              mkdir -p "$sourceRoot/third_party"
-              cp -r ${tokenizers-cpp-src} "$sourceRoot/third_party/tokenizers-cpp"
-              chmod -R u+w "$sourceRoot/third_party/tokenizers-cpp"
+                            # Replace empty submodule with the fetched tokenizers-cpp source
+                            rm -rf "$sourceRoot/third_party/tokenizers-cpp"
+                            mkdir -p "$sourceRoot/third_party"
+                            cp -r ${tokenizers-cpp-src} "$sourceRoot/third_party/tokenizers-cpp"
+                            chmod -R u+w "$sourceRoot/third_party/tokenizers-cpp"
 
-              # Same for the xgrammar submodule (v1.0.11+ builds flm_xgrammar
-              # from third_party/xgrammar sources).
-              rm -rf "$sourceRoot/third_party/xgrammar"
-              cp -r ${xgrammar-src} "$sourceRoot/third_party/xgrammar"
-              chmod -R u+w "$sourceRoot/third_party/xgrammar"
+                            # Same for the xgrammar submodule (v1.0.11+ builds flm_xgrammar
+                            # from third_party/xgrammar sources).
+                            rm -rf "$sourceRoot/third_party/xgrammar"
+                            cp -r ${xgrammar-src} "$sourceRoot/third_party/xgrammar"
+                            chmod -R u+w "$sourceRoot/third_party/xgrammar"
 
-              # Create a fake cargo stub so the CMake custom command won't invoke real cargo
-              cat > "$sourceRoot/third_party/tokenizers-cpp/fake-cargo" << 'FAKECARGO'
-#!/bin/sh
-exit 0
-FAKECARGO
-              chmod +x "$sourceRoot/third_party/tokenizers-cpp/fake-cargo"
+                            # Create a fake cargo stub so the CMake custom command won't invoke real cargo
+                            cat > "$sourceRoot/third_party/tokenizers-cpp/fake-cargo" << 'FAKECARGO'
+              #!/bin/sh
+              exit 0
+              FAKECARGO
+                            chmod +x "$sourceRoot/third_party/tokenizers-cpp/fake-cargo"
             '';
 
             postPatch = ''
@@ -263,63 +274,73 @@ FAKECARGO
               XRT_LIB_PATH_SAVED="${xrt}/lib"
               [[ ! -d "$XRT_LIB_PATH_SAVED" ]] && XRT_LIB_PATH_SAVED="${xrt}/lib64"
               wrapProgram $out/bin/flm --set XILINX_XRT "${xrt}"
-              FULL_RPATH=${pkgs.lib.makeLibraryPath [
-                pkgs.util-linux.lib
-                pkgs.ffmpeg.lib
-                pkgs.curl.out
-                pkgs.boost
-                pkgs.fftw
-                pkgs.fftwFloat
-                pkgs.fftwLongDouble
-                pkgs.libedit
-                pkgs.ncurses
-                pkgs.gcc.libc
-                pkgs.stdenv.cc.cc
-              ]}
+              FULL_RPATH=${
+                pkgs.lib.makeLibraryPath [
+                  pkgs.util-linux.lib
+                  pkgs.ffmpeg.lib
+                  pkgs.curl.out
+                  pkgs.boost
+                  pkgs.fftw
+                  pkgs.fftwFloat
+                  pkgs.fftwLongDouble
+                  pkgs.libedit
+                  pkgs.ncurses
+                  pkgs.gcc.libc
+                  pkgs.stdenv.cc.cc
+                ]
+              }
               patchelf --set-rpath "$out/lib:$XRT_LIB_PATH_SAVED:$FULL_RPATH" $out/bin/flm 2>/dev/null || true
               find $out/lib -name "*.so" -exec patchelf --set-rpath "$XRT_LIB_PATH_SAVED:$FULL_RPATH" {} \; 2>/dev/null || true
               runHook postFixup
             '';
           };
-        in {
+        in
+        {
           default = flm;
           fastflowlm = flm;
         }
       );
 
       # NixOS Module to enable FastFlowLM with the NPU driver
-      nixosModules.default = { config, lib, pkgs, ... }: {
-        options.services.fastflowlm = {
-          enable = lib.mkEnableOption "FastFlowLM Server";
-          package = lib.mkOption {
-            type = lib.types.package;
-            default = self.packages.${pkgs.system}.default;
+      nixosModules.default =
+        {
+          config,
+          lib,
+          pkgs,
+          ...
+        }:
+        {
+          options.services.fastflowlm = {
+            enable = lib.mkEnableOption "FastFlowLM Server";
+            package = lib.mkOption {
+              type = lib.types.package;
+              default = self.packages.${pkgs.system}.default;
+            };
+            model = lib.mkOption {
+              type = lib.types.str;
+              default = "llama3.2:1b";
+              description = "The model tag to serve by default.";
+            };
+            port = lib.mkOption {
+              type = lib.types.port;
+              default = 52625;
+            };
           };
-          model = lib.mkOption {
-            type = lib.types.str;
-            default = "llama3.2:1b";
-            description = "The model tag to serve by default.";
-          };
-          port = lib.mkOption {
-            type = lib.types.port;
-            default = 52625;
-          };
-        };
 
-        config = lib.mkIf config.services.fastflowlm.enable {
-          environment.systemPackages = [ config.services.fastflowlm.package ];
-          
-          systemd.services.fastflowlm = {
-            description = "FastFlowLM NPU Server";
-            after = [ "network.target" ];
-            wantedBy = [ "multi-user.target" ];
-            serviceConfig = {
-              ExecStart = "${config.services.fastflowlm.package}/bin/flm serve ${config.services.fastflowlm.model} --port ${toString config.services.fastflowlm.port}";
-              Restart = "always";
-              User = "root"; # Needs access to /dev/amdxdna
+          config = lib.mkIf config.services.fastflowlm.enable {
+            environment.systemPackages = [ config.services.fastflowlm.package ];
+
+            systemd.services.fastflowlm = {
+              description = "FastFlowLM NPU Server";
+              after = [ "network.target" ];
+              wantedBy = [ "multi-user.target" ];
+              serviceConfig = {
+                ExecStart = "${config.services.fastflowlm.package}/bin/flm serve ${config.services.fastflowlm.model} --port ${toString config.services.fastflowlm.port}";
+                Restart = "always";
+                User = "root"; # Needs access to /dev/amdxdna
+              };
             };
           };
         };
-      };
     };
 }
